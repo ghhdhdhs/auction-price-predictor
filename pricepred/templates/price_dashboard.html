@@ -1,0 +1,717 @@
+<!DOCTYPE html>  
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>E-Class Wagon Japan Auction Price Tool</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    >
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        body {
+            padding-top: 30px;
+            padding-bottom: 40px;
+        }
+        .section-title {
+            margin-bottom: 0.5rem;
+        }
+        .section-subtitle {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        .card {
+            margin-bottom: 24px;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 360px;   /* fixed height for charts */
+        }
+        .price-big {
+            font-size: 1.9rem;
+            font-weight: 600;
+        }
+        .price-range {
+            font-size: 1.05rem;
+            color: #555;
+        }
+        .error-text {
+            color: #b00020;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- ==========================
+         SECTION 1: History chart
+         ========================== -->
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <h2 class="section-title">Price vs Mileage (Japan Auctions)</h2>
+                    <div class="section-subtitle">
+                        Each dot is one E-Class wagon sold at auction in Japan. Select a variant to highlight.
+                    </div>
+                </div>
+                <div class="d-flex align-items-center">
+                    <label class="me-2 mb-0" for="history-model-filter">Variant:</label>
+                    <select id="history-model-filter" class="form-select form-select-sm">
+                        <option value="">All variants</option>
+                        {% for m in model_options %}
+                            <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="historyChart"></canvas>
+            </div>
+            <div id="history-empty-msg" class="mt-2 text-muted" style="display:none;">
+                No data available for this selection.
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================
+        SECTION 2: Prediction + Result
+        (stacked in a single card)
+        ========================== -->
+    <div class="card">
+        <div class="card-body">
+            <!-- Top: title + model selector -->
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h2 class="section-title mb-1">Auction Price Estimator</h2>
+                    <div class="section-subtitle">
+                        Estimate a fair hammer price for a similar car based on variant, mileage and overall grade.
+                    </div>
+                </div>
+                <div class="ms-3">
+                    <label for="model-type" class="form-label mb-1" style="font-size:0.85rem;">
+                        Prediction model
+                    </label>
+                    <select id="model-type" class="form-select form-select-sm">
+                        <option value="linear">Linear (mileage)</option>
+                        <option value="logm" >linear (log mileage)</option>
+                        <option value="xgb" selected>XGBoost</option>
+                    </select>
+                </div>
+            </div>
+
+            <form id="predict-form" class="row g-3 align-items-end">
+
+                <!-- Variant: slightly larger -->
+                <div class="col-12 col-md-6">
+                    <label for="model" class="form-label">Variant</label>
+                    <select id="model" class="form-select" required>
+                        <option value="" selected disabled>-- Select Variant --</option>
+                        {% for m in model_options %}
+                            <option value="{{ m }}">{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Overall Grade: smaller -->
+                <div class="col-6 col-md-3">
+                    <label for="ovrl_grade" class="form-label">Overall Grade</label>
+                    <select id="ovrl_grade" class="form-select" required>
+                        <option value="" selected disabled>-- Select Grade --</option>
+                        {% for g in grade_options %}
+                            {% if g != "3.5" and g != 3.5 %}
+                                <option value="{{ g }}">{{ g }}</option>
+                            {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Mileage: same as grade -->
+                <div class="col-6 col-md-3">
+                    <label for="mileage" class="form-label">Mileage (km)</label>
+                    <input type="number" class="form-control" id="mileage"
+                        min="0" max="300000" step="1000" inputmode="numeric" required>
+                </div>
+
+                <!-- Button on its own row -->
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        Predict Price
+                    </button>
+                </div>
+            </form>
+
+            <div id="predict-error" class="mt-3 error-text"></div>
+
+            <hr class="my-4">
+
+            <!-- Bottom: result + chart -->
+            <h3 class="section-title">Estimated Hammer Price</h3>
+            <div class="section-subtitle mb-2">
+                Central estimate with an approximate confidence interval based on the selected model’s residuals.
+            </div>
+
+            <div id="predict-result" class="mb-3">
+                <p class="text-muted mb-0">
+                    No prediction yet. Fill the form and click <strong>Predict Price</strong>.
+                </p>
+            </div>
+
+            <div class="chart-container" id="range-wrapper" style="display:none;">
+                <canvas id="rangeChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+
+</div>
+
+<script>
+function yen(n) {
+    if (n === null || n === undefined || isNaN(n)) return "-";
+    return n.toLocaleString("ja-JP");
+}
+
+// ============================
+// Model display helpers
+// ============================
+
+const MODEL_DISPLAY = {
+    "E400":    "E 400 4MATIC Wagon",
+    "E43":     "AMG E 43 4MATIC Wagon",
+    "E53_PRE": "AMG E 53 4MATIC+ Wagon (2018–2020, pre-facelift)",
+    "E53_FL":  "AMG E 53 4MATIC+ Wagon (2021+, facelift)",
+};
+
+// shorter names for legend, to avoid clutter
+const MODEL_SHORT = {
+    "E400":    "E 400 Wagon",
+    "E43":     "E 43 Wagon",
+    "E53_PRE": "E 53 Wagon (Pre-facelift)",
+    "E53_FL":  "E 53 Wagon (Facelift)",
+};
+
+function displayModelName(code) {
+    const key = (code || "").toUpperCase();
+    return MODEL_DISPLAY[key] || code || "Unknown";
+}
+
+function shortModelName(code) {
+    const key = (code || "").toUpperCase();
+    return MODEL_SHORT[key] || displayModelName(code);
+}
+
+function relabelModelSelect(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    for (const opt of sel.options) {
+        const key = (opt.value || "").toUpperCase();
+        if (MODEL_DISPLAY[key]) {
+            opt.textContent = MODEL_DISPLAY[key];
+        }
+    }
+}
+
+// Pretty name for backend model_used
+function prettyModelModel(name) {
+    switch ((name || "").toLowerCase()) {
+        case "linear":
+            return "Linear regression (raw mileage)";
+        case "xgb":
+            return "XGBoost regressor";
+        case "logm":
+        default:
+            return "Log-mileage linear regression";
+    }
+}
+
+// ============================
+// History chart: scatter + log-linear trend
+// ============================
+
+// Colour per model: harmonised OEM-style palette
+function modelColor(model) {
+    const key = (model || "").toUpperCase();
+    switch (key) {
+        case "E400":
+            // Deep, muted blue
+            return {
+                border: "rgba(53, 89, 122, 1)",   // #35597A
+                fill:   "rgba(53, 89, 122, 0.20)"
+            };
+
+        case "E43":
+            // Rich wine / AMG red
+            return {
+                border: "rgba(177, 58, 58, 1)",   // #B13A3A
+                fill:   "rgba(177, 58, 58, 0.23)"
+            };
+
+        case "E53_PRE":
+            // Medium teal (pre-facelift)
+            return {
+                border: "rgba(58, 143, 138, 1)",  // #3A8F8A
+                fill:   "rgba(58, 143, 138, 0.22)"
+            };
+
+        case "E53_FL":
+            // Slightly lighter teal (facelift)
+            return {
+                border: "rgba(83, 185, 177, 1)",  // #53B9B1
+                fill:   "rgba(83, 185, 177, 0.22)"
+            };
+
+        case "E53":  // raw E53 fallback
+            return {
+                border: "rgba(58, 143, 138, 1)",
+                fill:   "rgba(58, 143, 138, 0.22)"
+            };
+
+        default:
+            // Neutral purple-grey fallback
+            return {
+                border: "rgba(120, 102, 150, 1)", // #786696
+                fill:   "rgba(120, 102, 150, 0.18)"
+            };
+    }
+}
+
+// ---- log-linear regression: y = a + b * log(1 + x) ----
+function logLinearRegression(points) {
+    // Use only points with x > 0
+    const filtered = points.filter(p => p.x > 0);
+    const n = filtered.length;
+    if (n < 2) return null;
+
+    let sumZ = 0, sumZ2 = 0, sumY = 0, sumZY = 0;
+
+    for (const p of filtered) {
+        const x = p.x;
+        const y = p.y;
+        const z = Math.log1p(x);  // log(1 + mileage)
+
+        sumZ  += z;
+        sumZ2 += z * z;
+        sumY  += y;
+        sumZY += z * y;
+    }
+
+    // Normal equations for 2-parameter linear regression in z:
+    // | n    sumZ  | [a] = [sumY ]
+    // | sumZ sumZ2 | [b]   [sumZY]
+    const det = n * sumZ2 - sumZ * sumZ;
+    if (Math.abs(det) < 1e-12) return null;
+
+    const a = (sumY * sumZ2 - sumZ * sumZY) / det;
+    const b = (n * sumZY - sumZ * sumY) / det;
+
+    return { a, b };
+}
+
+const historyCtx = document.getElementById("historyChart").getContext("2d");
+let historyChart = new Chart(historyCtx, {
+    type: "scatter",
+    data: {
+        datasets: []   // scatter + trend per model
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: {
+                title: { display: true, text: "Mileage (km)" }
+            },
+            y: {
+                title: { display: true, text: "Final Price (JPY)" },
+                ticks: {
+                    callback: function(value) {
+                        return "¥" + yen(value);
+                    }
+                }
+            }
+        },
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        const p = ctx.raw;
+                        if (p && p.isTrend) {
+                            return `Trend line: ${yen(ctx.parsed.x)} km → ¥${yen(ctx.parsed.y)}`;
+                        }
+                        return `Variant: ${displayModelName(p.model)}, Grade: ${p.grade}, `
+                             + `Mileage: ${yen(p.x)} km, Price: ¥${yen(p.y)}`;
+                    }
+                }
+            },
+            legend: {
+                display: true,
+                position: "top",
+                labels: {
+                    // hide "... trend" entries from legend to keep it clean
+                    filter: function(item) {
+                        return !item.text.includes("trend");
+                    }
+                }
+            }
+        }
+    }
+});
+
+async function loadHistory(modelFilter = "") {
+    const emptyMsg = document.getElementById("history-empty-msg");
+    emptyMsg.style.display = "none";
+
+    const params = modelFilter ? `?model=${encodeURIComponent(modelFilter)}` : "";
+    const resp = await fetch(`/api/history${params}`);
+    if (!resp.ok) {
+        emptyMsg.textContent = "Failed to load history data.";
+        emptyMsg.style.display = "block";
+        historyChart.data.datasets = [];
+        historyChart.update();
+        return;
+    }
+
+    const data = await resp.json();
+    const pts = data.points || [];
+
+    if (!pts.length) {
+        emptyMsg.textContent = "No data available for this selection.";
+        emptyMsg.style.display = "block";
+        historyChart.data.datasets = [];
+        historyChart.update();
+        return;
+    }
+
+    // group points by model
+    const byModel = {};
+    for (const p of pts) {
+        const m = (p.model || "").toUpperCase();
+        if (!byModel[m]) byModel[m] = [];
+        byModel[m].push({
+            x: p.mileage,
+            y: p.price,
+            model: m,
+            grade: p.grade
+        });
+    }
+
+    const datasets = [];
+
+    // enforce a stable, logical legend order
+    const MODEL_ORDER = ["E53_FL", "E53_PRE", "E43", "E400"];
+
+    const sortedModels = Object.keys(byModel).sort((a, b) => {
+        const ia = MODEL_ORDER.indexOf(a);
+        const ib = MODEL_ORDER.indexOf(b);
+
+        const ra = ia === -1 ? 999 : ia;  // unknowns go last
+        const rb = ib === -1 ? 999 : ib;
+
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b);        // tie-break within unknowns
+    });
+
+    for (const model of sortedModels) {
+        const points = byModel[model];
+
+        // sort points by mileage
+        points.sort((a, b) => a.x - b.x);
+        const colors = modelColor(model);
+
+        // scatter (actual data)
+        datasets.push({
+            label: shortModelName(model),   // short label in legend
+            data: points,
+            type: "scatter",
+            showLine: false,                // no spaghetti line
+            pointRadius: 4,
+            pointHoverRadius: 5,
+            borderColor: colors.border,
+            backgroundColor: colors.fill,
+        });
+
+        // log-linear regression trend line
+        const reg = logLinearRegression(points);
+        if (reg) {
+            const { a, b } = reg;
+
+            const xs = points.map(p => p.x);
+            const xMin = Math.min(...xs);
+            const xMax = Math.max(...xs);
+
+            const curve = [];
+            const steps = 80;  // smooth curve
+            const step = (xMax - xMin) / steps;
+
+            for (let x = xMin; x <= xMax; x += step) {
+                const z = Math.log1p(x);   // log(1 + mileage)
+                const y = a + b * z;
+                curve.push({ x, y, isTrend: true, model });
+            }
+
+            datasets.push({
+                label: `${shortModelName(model)} trend`,
+                type: "line",
+                data: curve,
+                borderColor: colors.border,
+                borderWidth: 2,
+                tension: 0.35,   // smooth line
+                pointRadius: 0,
+                pointHoverRadius: 0,
+                fill: false,
+            });
+        }
+    }
+
+    historyChart.data.datasets = datasets;
+    historyChart.update();
+}
+
+// ============================
+// Prediction + range chart
+// ============================
+const predictForm   = document.getElementById("predict-form");
+const predictResult = document.getElementById("predict-result");
+const predictError  = document.getElementById("predict-error");
+
+const rangeWrapper  = document.getElementById("range-wrapper");
+const rangeCtx      = document.getElementById("rangeChart").getContext("2d");
+
+let rangeChart = new Chart(rangeCtx, {
+    type: "line",
+    data: {
+        datasets: []
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,  // we supply {x, y} objects
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: function (ctx) {
+                        // ctx.parsed.x is price in JPY
+                        return "¥" + yen(ctx.parsed.x);
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                type: "linear",
+                title: { display: true, text: "Hammer Price (JPY)" },
+                ticks: {
+                    callback: function (value) {
+                        return "¥" + yen(value);
+                    }
+                }
+            },
+            y: {
+                display: false   // we only care about the shape, not actual density values
+            }
+        }
+    }
+});
+
+// ============================
+// Mileage arrow behaviour (±10,000, keep tail, respect max)
+// ============================
+const mileageInput = document.getElementById("mileage");
+const MILEAGE_MAX = mileageInput && mileageInput.max
+    ? parseInt(mileageInput.max, 10)
+    : 300000;
+
+if (mileageInput) {
+    mileageInput.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+
+            const deltaBase = (e.key === "ArrowUp" ? 10000 : -10000);
+            let val = parseInt(this.value || "0", 10);
+            if (isNaN(val) || val < 0) val = 0;
+
+            // clamp current value to max first
+            if (val > MILEAGE_MAX) val = MILEAGE_MAX;
+
+            const tail = val % 10000;  // keep last 4 digits
+            let base = val - tail;     // multiple of 10,000
+
+            base += deltaBase;         // move one "block" of 10,000
+
+            let newVal = base + tail;
+
+            // final clamp 0..MILEAGE_MAX
+            if (newVal < 0) newVal = 0;
+            if (newVal > MILEAGE_MAX) newVal = MILEAGE_MAX;
+
+            this.value = newVal;
+        }
+    });
+}
+
+// ============================
+// Init wiring
+// ============================
+
+// Relabel selects with friendly names
+relabelModelSelect("model");
+relabelModelSelect("history-model-filter");
+
+// Initial history load
+loadHistory();
+
+// Filter change
+document.getElementById("history-model-filter").addEventListener("change", function () {
+    loadHistory(this.value);
+});
+
+// Prediction submit
+predictForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    predictError.textContent = "";
+    predictResult.innerHTML = "<p class='text-muted mb-0'>Predicting...</p>";
+
+    const model      = document.getElementById("model").value;
+    const mileageRaw = document.getElementById("mileage").value.trim();
+    const grade      = document.getElementById("ovrl_grade").value;
+    const modelType  = document.getElementById("model-type").value;
+
+    // Ensure mileage is a non-negative integer, no decimals
+    if (!/^\d+$/.test(mileageRaw)) {
+        predictError.textContent = "Please enter mileage as a whole number (no decimals).";
+        predictResult.innerHTML = "";
+        return;
+    }
+    const mileage = parseInt(mileageRaw, 10);
+    if (isNaN(mileage) || mileage < 0) {
+        predictError.textContent = "Please enter a valid non-negative mileage.";
+        predictResult.innerHTML = "";
+        return;
+    }
+    if (mileage > MILEAGE_MAX) {
+        predictError.textContent = `Please enter mileage ≤ ${MILEAGE_MAX.toLocaleString("en-AU")} km.`;
+        predictResult.innerHTML = "";
+        return;
+    }
+
+    try {
+        const resp = await fetch("/api/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                Model: model,
+                mileage: mileage,
+                ovrl_grade: grade,
+                model_type: modelType
+            })
+        });
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            predictError.textContent = "Error: " + text;
+            predictResult.innerHTML = "";
+            return;
+        }
+
+        const data = await resp.json();
+        const { price_jpy, low_jpy, high_jpy, model_used, ci_level } = data;
+
+        const ciPercent = (ci_level || 0.90) * 100;
+        const modelLabel = prettyModelModel(model_used);
+
+        predictResult.innerHTML = `
+            <p class="price-big mb-1">¥ ${yen(price_jpy)}</p>
+            <p class="price-range mb-1">
+                Approx. ${ciPercent.toFixed(0)}% confidence interval: ¥ ${yen(low_jpy)} – ¥ ${yen(high_jpy)}
+            </p>
+            <p class="text-muted mb-0" style="font-size:0.85rem;">
+                Model: ${modelLabel}. Interval estimated from the model's residual spread on historical Japan auction data.
+            </p>
+        `;
+
+        // ----- Build an approximate normal bell curve using the CI -----
+        const mu   = price_jpy;
+        const low  = low_jpy;
+        const high = high_jpy;
+
+        // 90% CI ≈ μ ± 1.645σ  → solve for σ
+        const Z90 = 1.645;
+        let sigma = (high - low) / (2 * Z90);
+        // basic guard in case CI is degenerate
+        if (!sigma || sigma <= 0) {
+            sigma = mu * 0.20 / Z90;  // fallback: ~20% band
+        }
+
+        // Generate curve points on [low - σ, high + σ]
+        const xMin = Math.max(0, low - sigma);
+        const xMax = high + sigma;
+        const N = 80;
+        const curve = [];
+        let maxY = 0;
+
+        for (let i = 0; i <= N; i++) {
+            const x = xMin + (xMax - xMin) * (i / N);
+            const z = (x - mu) / sigma;
+            const y = Math.exp(-0.5 * z * z);  // unnormalised normal pdf
+            curve.push({ x: x, y: y });
+            if (y > maxY) maxY = y;
+        }
+
+        // Datasets: bell curve + vertical line for estimate + markers for CI bounds
+        rangeChart.data.datasets = [
+            {
+                label: "Predicted distribution",
+                data: curve,
+                parsing: false,
+                borderWidth: 2,
+                tension: 0.35,
+                pointRadius: 0
+            },
+            {
+                label: "Estimate",
+                data: [
+                    { x: mu,   y: 0 },
+                    { x: mu,   y: maxY }
+                ],
+                parsing: false,
+                borderDash: [5, 5],
+                pointRadius: 0,
+                borderWidth: 1.5
+            },
+            {
+                label: "CI low",
+                data: [
+                    { x: low,  y: 0 },
+                    { x: low,  y: maxY * 0.8 }
+                ],
+                parsing: false,
+                pointRadius: 0,
+                borderWidth: 1,
+            },
+            {
+                label: "CI high",
+                data: [
+                    { x: high, y: 0 },
+                    { x: high, y: maxY * 0.8 }
+                ],
+                parsing: false,
+                pointRadius: 0,
+                borderWidth: 1,
+            }
+        ];
+
+        rangeChart.update();
+        rangeWrapper.style.display = "block";
+
+    } catch (err) {
+        console.error(err);
+        predictError.textContent = "Request failed. Check server logs.";
+        predictResult.innerHTML = "";
+    }
+});
+</script>
+</body>
+</html>

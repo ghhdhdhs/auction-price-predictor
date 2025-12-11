@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# ML model artifacts
+models/*.pkl
+
+# IDE
+.vscode/
+.idea/
