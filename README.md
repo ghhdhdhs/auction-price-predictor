@@ -109,6 +109,79 @@ The app runs at:
 
 ---
 
+
+## 📊 Model Evaluation (Optional)
+
+You can evaluate and compare model performance (Linear, Log-Mileage, XGBoost)
+using the built-in cross-validation functions in `pricepred.ml_basic`.
+
+These functions measure:
+- MAE   = Mean Absolute Error  
+- RMSE  = Root Mean Squared Error  
+- R²    = Coefficient of Determination  
+- MAPE  = Mean Absolute Percentage Error  
+
+Evaluation does NOT require trained .pkl model files — it trains temporary models internally.
+
+---
+
+### 🔍 1. Leave-One-Out Cross-Validation (LOOCV)
+
+LOOCV is the most accurate form of cross-validation.  
+Each row in the dataset becomes its own test set.
+
+To run LOOCV:
+
+1. Open Django shell:
+
+       python manage.py shell
+
+2. Run:
+
+       from pricepred.ml_basic import evaluate_models_all, print_eval_table
+
+       results = evaluate_models_all(cv="loocv")
+       print_eval_table(results, decimals=4)
+
+Example output shape:
+
+       Model        | MAE     | RMSE    | R2    | MAPE
+       ------------ | ------- | ------- | ----- | -------
+       linear       | ...     | ...     | ...   | ...
+       log_mileage  | ...     | ...     | ...   | ...
+       xgboost      | ...     | ...     | ...   | ...
+
+
+---
+
+### 🔍 2. K-Fold Cross-Validation (default k=5)
+
+K-Fold CV splits the data into *k* equal parts (folds).  
+This is faster than LOOCV and still gives stable results.
+
+To run 5-fold CV:
+
+1. Open Django shell:
+
+       python manage.py shell
+
+2. Run:
+
+       from pricepred.ml_basic import evaluate_models_all, print_eval_table
+
+       results = evaluate_models_all(cv="kfold", k=5, random_state=42)
+       print_eval_table(results, decimals=4)
+You can change **k** to any number, e.g. k=10:
+
+
+---
+
+This evaluation step is mainly for developers and data enthusiasts who want to understand which model performs best on the current dataset.
+
+
+
+
+
 ## 👤 Author
 
 Built by Patrick Mao.
