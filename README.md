@@ -179,9 +179,12 @@ You can change **k** to any number, e.g. k=10:
 This evaluation step is mainly for developers and data enthusiasts who want to understand which model performs best on the current dataset.
 
 
-
+## ⚠️ Disclaimer
+This project is for personal and educational use only.
+The prediction results are approximate and may be inaccurate, and should not be used as financial advice or relied upon for real-world purchasing decisions.
 
 
 ## 👤 Author
 
-Built by Patrick Mao.
+Built by Patrick Mao. <br>
+Debugged by future Patrick Mao.
