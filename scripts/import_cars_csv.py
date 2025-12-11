@@ -12,7 +12,7 @@ django.setup()
 import pandas as pd
 from pricepred.models import Maker, Chassis, CarSale
 
-CSV_PATH = Path("cars.csv")  # change if your file is elsewhere
+CSV_PATH = BASE_DIR ("cars.csv")  # change if your file is elsewhere
 
 # Map normalized 'model_key' to (variant label, 6-digit chassis code)
 # NOTE:
