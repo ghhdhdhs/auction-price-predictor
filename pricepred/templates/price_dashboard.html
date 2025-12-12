@@ -9,36 +9,14 @@
     >
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
-        body {
-            padding-top: 30px;
-            padding-bottom: 40px;
-        }
-        .section-title {
-            margin-bottom: 0.5rem;
-        }
-        .section-subtitle {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        .card {
-            margin-bottom: 24px;
-        }
-        .chart-container {
-            position: relative;
-            width: 100%;
-            height: 360px;   /* fixed height for charts */
-        }
-        .price-big {
-            font-size: 1.9rem;
-            font-weight: 600;
-        }
-        .price-range {
-            font-size: 1.05rem;
-            color: #555;
-        }
-        .error-text {
-            color: #b00020;
-        }
+        body { padding-top: 30px; padding-bottom: 40px; }
+        .section-title { margin-bottom: 0.5rem; }
+        .section-subtitle { font-size: 0.9rem; color: #666; }
+        .card { margin-bottom: 24px; }
+        .chart-container { position: relative; width: 100%; height: 360px; }
+        .price-big { font-size: 1.9rem; font-weight: 600; }
+        .price-range { font-size: 1.05rem; color: #555; }
+        .error-text { color: #b00020; }
     </style>
 </head>
 <body>
@@ -78,11 +56,9 @@
 
     <!-- ==========================
         SECTION 2: Prediction + Result
-        (stacked in a single card)
         ========================== -->
     <div class="card">
         <div class="card-body">
-            <!-- Top: title + model selector -->
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h2 class="section-title mb-1">Auction Price Estimator</h2>
@@ -104,7 +80,7 @@
 
             <form id="predict-form" class="row g-3 align-items-end">
 
-                <!-- Variant: slightly larger -->
+                <!-- Variant -->
                 <div class="col-12 col-md-6">
                     <label for="model" class="form-label">Variant</label>
                     <select id="model" class="form-select" required>
@@ -115,7 +91,7 @@
                     </select>
                 </div>
 
-                <!-- Overall Grade: smaller -->
+                <!-- Overall Grade -->
                 <div class="col-6 col-md-3">
                     <label for="ovrl_grade" class="form-label">Overall Grade</label>
                     <select id="ovrl_grade" class="form-select" required>
@@ -128,14 +104,26 @@
                     </select>
                 </div>
 
-                <!-- Mileage: same as grade -->
+                <!-- Mileage -->
                 <div class="col-6 col-md-3">
                     <label for="mileage" class="form-label">Mileage (km)</label>
                     <input type="number" class="form-control" id="mileage"
                         min="0" max="300000" step="1000" inputmode="numeric" required>
                 </div>
 
-                <!-- Button on its own row -->
+                <!-- Colour (NEW) -->
+                <div class="col-12 col-md-3">
+                    <label for="colour" class="form-label">Colour</label>
+                    <select id="colour" class="form-select">
+                        <option value="" selected>Any (average)</option>
+                        <option value="White">White</option>
+                        <option value="Black">Black</option>
+                        <option value="Silver">Silver</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+
+                <!-- Button -->
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">
                         Predict Price
@@ -147,7 +135,6 @@
 
             <hr class="my-4">
 
-            <!-- Bottom: result + chart -->
             <h3 class="section-title">Estimated Hammer Price</h3>
             <div class="section-subtitle mb-2">
                 Central estimate with an approximate confidence interval based on the selected model’s residuals.
@@ -165,7 +152,6 @@
         </div>
     </div>
 
-
 </div>
 
 <script>
@@ -174,10 +160,6 @@ function yen(n) {
     return n.toLocaleString("ja-JP");
 }
 
-// ============================
-// Model display helpers
-// ============================
-
 const MODEL_DISPLAY = {
     "E400":    "E 400 4MATIC Wagon",
     "E43":     "AMG E 43 4MATIC Wagon",
@@ -185,7 +167,6 @@ const MODEL_DISPLAY = {
     "E53_FL":  "AMG E 53 4MATIC+ Wagon (2021+, facelift)",
 };
 
-// shorter names for legend, to avoid clutter
 const MODEL_SHORT = {
     "E400":    "E 400 Wagon",
     "E43":     "E 43 Wagon",
@@ -208,128 +189,65 @@ function relabelModelSelect(selectId) {
     if (!sel) return;
     for (const opt of sel.options) {
         const key = (opt.value || "").toUpperCase();
-        if (MODEL_DISPLAY[key]) {
-            opt.textContent = MODEL_DISPLAY[key];
-        }
+        if (MODEL_DISPLAY[key]) opt.textContent = MODEL_DISPLAY[key];
     }
 }
 
-// Pretty name for backend model_used
 function prettyModelModel(name) {
     switch ((name || "").toLowerCase()) {
-        case "linear":
-            return "Linear regression (raw mileage)";
-        case "xgb":
-            return "XGBoost regressor";
+        case "linear": return "Linear regression (raw mileage)";
+        case "xgb":    return "XGBoost regressor";
         case "logm":
-        default:
-            return "Log-mileage linear regression";
+        default:       return "Log-mileage linear regression";
     }
 }
 
-// ============================
-// History chart: scatter + log-linear trend
-// ============================
-
-// Colour per model: harmonised OEM-style palette
 function modelColor(model) {
     const key = (model || "").toUpperCase();
     switch (key) {
-        case "E400":
-            // Deep, muted blue
-            return {
-                border: "rgba(53, 89, 122, 1)",   // #35597A
-                fill:   "rgba(53, 89, 122, 0.20)"
-            };
-
-        case "E43":
-            // Rich wine / AMG red
-            return {
-                border: "rgba(177, 58, 58, 1)",   // #B13A3A
-                fill:   "rgba(177, 58, 58, 0.23)"
-            };
-
-        case "E53_PRE":
-            // Medium teal (pre-facelift)
-            return {
-                border: "rgba(58, 143, 138, 1)",  // #3A8F8A
-                fill:   "rgba(58, 143, 138, 0.22)"
-            };
-
-        case "E53_FL":
-            // Slightly lighter teal (facelift)
-            return {
-                border: "rgba(83, 185, 177, 1)",  // #53B9B1
-                fill:   "rgba(83, 185, 177, 0.22)"
-            };
-
-        case "E53":  // raw E53 fallback
-            return {
-                border: "rgba(58, 143, 138, 1)",
-                fill:   "rgba(58, 143, 138, 0.22)"
-            };
-
-        default:
-            // Neutral purple-grey fallback
-            return {
-                border: "rgba(120, 102, 150, 1)", // #786696
-                fill:   "rgba(120, 102, 150, 0.18)"
-            };
+        case "E400": return { border: "rgba(53, 89, 122, 1)",  fill: "rgba(53, 89, 122, 0.20)" };
+        case "E43":  return { border: "rgba(177, 58, 58, 1)",  fill: "rgba(177, 58, 58, 0.23)" };
+        case "E53_PRE": return { border: "rgba(58, 143, 138, 1)", fill: "rgba(58, 143, 138, 0.22)" };
+        case "E53_FL":  return { border: "rgba(83, 185, 177, 1)", fill: "rgba(83, 185, 177, 0.22)" };
+        case "E53":     return { border: "rgba(58, 143, 138, 1)", fill: "rgba(58, 143, 138, 0.22)" };
+        default: return { border: "rgba(120, 102, 150, 1)", fill: "rgba(120, 102, 150, 0.18)" };
     }
 }
 
-// ---- log-linear regression: y = a + b * log(1 + x) ----
 function logLinearRegression(points) {
-    // Use only points with x > 0
     const filtered = points.filter(p => p.x > 0);
     const n = filtered.length;
     if (n < 2) return null;
 
     let sumZ = 0, sumZ2 = 0, sumY = 0, sumZY = 0;
-
     for (const p of filtered) {
-        const x = p.x;
-        const y = p.y;
-        const z = Math.log1p(x);  // log(1 + mileage)
-
+        const z = Math.log1p(p.x);
         sumZ  += z;
         sumZ2 += z * z;
-        sumY  += y;
-        sumZY += z * y;
+        sumY  += p.y;
+        sumZY += z * p.y;
     }
 
-    // Normal equations for 2-parameter linear regression in z:
-    // | n    sumZ  | [a] = [sumY ]
-    // | sumZ sumZ2 | [b]   [sumZY]
     const det = n * sumZ2 - sumZ * sumZ;
     if (Math.abs(det) < 1e-12) return null;
 
     const a = (sumY * sumZ2 - sumZ * sumZY) / det;
     const b = (n * sumZY - sumZ * sumY) / det;
-
     return { a, b };
 }
 
 const historyCtx = document.getElementById("historyChart").getContext("2d");
 let historyChart = new Chart(historyCtx, {
     type: "scatter",
-    data: {
-        datasets: []   // scatter + trend per model
-    },
+    data: { datasets: [] },
     options: {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-            x: {
-                title: { display: true, text: "Mileage (km)" }
-            },
+            x: { title: { display: true, text: "Mileage (km)" } },
             y: {
                 title: { display: true, text: "Final Price (JPY)" },
-                ticks: {
-                    callback: function(value) {
-                        return "¥" + yen(value);
-                    }
-                }
+                ticks: { callback: (value) => "¥" + yen(value) }
             }
         },
         plugins: {
@@ -337,9 +255,7 @@ let historyChart = new Chart(historyCtx, {
                 callbacks: {
                     label: function(ctx) {
                         const p = ctx.raw;
-                        if (p && p.isTrend) {
-                            return `Trend line: ${yen(ctx.parsed.x)} km → ¥${yen(ctx.parsed.y)}`;
-                        }
+                        if (p && p.isTrend) return `Trend line: ${yen(ctx.parsed.x)} km → ¥${yen(ctx.parsed.y)}`;
                         return `Variant: ${displayModelName(p.model)}, Grade: ${p.grade}, `
                              + `Mileage: ${yen(p.x)} km, Price: ¥${yen(p.y)}`;
                     }
@@ -348,12 +264,7 @@ let historyChart = new Chart(historyCtx, {
             legend: {
                 display: true,
                 position: "top",
-                labels: {
-                    // hide "... trend" entries from legend to keep it clean
-                    filter: function(item) {
-                        return !item.text.includes("trend");
-                    }
-                }
+                labels: { filter: (item) => !item.text.includes("trend") }
             }
         }
     }
@@ -384,70 +295,55 @@ async function loadHistory(modelFilter = "") {
         return;
     }
 
-    // group points by model
     const byModel = {};
     for (const p of pts) {
         const m = (p.model || "").toUpperCase();
         if (!byModel[m]) byModel[m] = [];
-        byModel[m].push({
-            x: p.mileage,
-            y: p.price,
-            model: m,
-            grade: p.grade
-        });
+        byModel[m].push({ x: p.mileage, y: p.price, model: m, grade: p.grade });
     }
 
     const datasets = [];
-
-    // enforce a stable, logical legend order
     const MODEL_ORDER = ["E53_FL", "E53_PRE", "E43", "E400"];
 
     const sortedModels = Object.keys(byModel).sort((a, b) => {
         const ia = MODEL_ORDER.indexOf(a);
         const ib = MODEL_ORDER.indexOf(b);
-
-        const ra = ia === -1 ? 999 : ia;  // unknowns go last
+        const ra = ia === -1 ? 999 : ia;
         const rb = ib === -1 ? 999 : ib;
-
         if (ra !== rb) return ra - rb;
-        return a.localeCompare(b);        // tie-break within unknowns
+        return a.localeCompare(b);
     });
 
     for (const model of sortedModels) {
         const points = byModel[model];
-
-        // sort points by mileage
         points.sort((a, b) => a.x - b.x);
+
         const colors = modelColor(model);
 
-        // scatter (actual data)
         datasets.push({
-            label: shortModelName(model),   // short label in legend
+            label: shortModelName(model),
             data: points,
             type: "scatter",
-            showLine: false,                // no spaghetti line
+            showLine: false,
             pointRadius: 4,
             pointHoverRadius: 5,
             borderColor: colors.border,
             backgroundColor: colors.fill,
         });
 
-        // log-linear regression trend line
         const reg = logLinearRegression(points);
         if (reg) {
             const { a, b } = reg;
-
             const xs = points.map(p => p.x);
             const xMin = Math.min(...xs);
             const xMax = Math.max(...xs);
 
             const curve = [];
-            const steps = 80;  // smooth curve
+            const steps = 80;
             const step = (xMax - xMin) / steps;
 
             for (let x = xMin; x <= xMax; x += step) {
-                const z = Math.log1p(x);   // log(1 + mileage)
-                const y = a + b * z;
+                const y = a + b * Math.log1p(x);
                 curve.push({ x, y, isTrend: true, model });
             }
 
@@ -457,7 +353,7 @@ async function loadHistory(modelFilter = "") {
                 data: curve,
                 borderColor: colors.border,
                 borderWidth: 2,
-                tension: 0.35,   // smooth line
+                tension: 0.35,
                 pointRadius: 0,
                 pointHoverRadius: 0,
                 fill: false,
@@ -481,89 +377,56 @@ const rangeCtx      = document.getElementById("rangeChart").getContext("2d");
 
 let rangeChart = new Chart(rangeCtx, {
     type: "line",
-    data: {
-        datasets: []
-    },
+    data: { datasets: [] },
     options: {
         responsive: true,
         maintainAspectRatio: false,
-        parsing: false,  // we supply {x, y} objects
+        parsing: false,
         plugins: {
             legend: { display: false },
-            tooltip: {
-                callbacks: {
-                    label: function (ctx) {
-                        // ctx.parsed.x is price in JPY
-                        return "¥" + yen(ctx.parsed.x);
-                    }
-                }
-            }
+            tooltip: { callbacks: { label: (ctx) => "¥" + yen(ctx.parsed.x) } }
         },
         scales: {
             x: {
                 type: "linear",
                 title: { display: true, text: "Hammer Price (JPY)" },
-                ticks: {
-                    callback: function (value) {
-                        return "¥" + yen(value);
-                    }
-                }
+                ticks: { callback: (value) => "¥" + yen(value) }
             },
-            y: {
-                display: false   // we only care about the shape, not actual density values
-            }
+            y: { display: false }
         }
     }
 });
 
-// ============================
-// Mileage arrow behaviour (±10,000, keep tail, respect max)
-// ============================
+// Mileage arrow behaviour
 const mileageInput = document.getElementById("mileage");
-const MILEAGE_MAX = mileageInput && mileageInput.max
-    ? parseInt(mileageInput.max, 10)
-    : 300000;
+const MILEAGE_MAX = mileageInput && mileageInput.max ? parseInt(mileageInput.max, 10) : 300000;
 
 if (mileageInput) {
     mileageInput.addEventListener("keydown", function (e) {
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
             e.preventDefault();
-
             const deltaBase = (e.key === "ArrowUp" ? 10000 : -10000);
             let val = parseInt(this.value || "0", 10);
             if (isNaN(val) || val < 0) val = 0;
-
-            // clamp current value to max first
             if (val > MILEAGE_MAX) val = MILEAGE_MAX;
 
-            const tail = val % 10000;  // keep last 4 digits
-            let base = val - tail;     // multiple of 10,000
-
-            base += deltaBase;         // move one "block" of 10,000
+            const tail = val % 10000;
+            let base = val - tail;
+            base += deltaBase;
 
             let newVal = base + tail;
-
-            // final clamp 0..MILEAGE_MAX
             if (newVal < 0) newVal = 0;
             if (newVal > MILEAGE_MAX) newVal = MILEAGE_MAX;
-
             this.value = newVal;
         }
     });
 }
 
-// ============================
 // Init wiring
-// ============================
-
-// Relabel selects with friendly names
 relabelModelSelect("model");
 relabelModelSelect("history-model-filter");
-
-// Initial history load
 loadHistory();
 
-// Filter change
 document.getElementById("history-model-filter").addEventListener("change", function () {
     loadHistory(this.value);
 });
@@ -579,7 +442,9 @@ predictForm.addEventListener("submit", async function (e) {
     const grade      = document.getElementById("ovrl_grade").value;
     const modelType  = document.getElementById("model-type").value;
 
-    // Ensure mileage is a non-negative integer, no decimals
+    // NEW: colour select (empty string means "Any")
+    const colour     = document.getElementById("colour").value;
+
     if (!/^\d+$/.test(mileageRaw)) {
         predictError.textContent = "Please enter mileage as a whole number (no decimals).";
         predictResult.innerHTML = "";
@@ -605,7 +470,8 @@ predictForm.addEventListener("submit", async function (e) {
                 Model: model,
                 mileage: mileage,
                 ovrl_grade: grade,
-                model_type: modelType
+                model_type: modelType,
+                colour: colour  // <-- NEW ("" = Any)
             })
         });
 
@@ -632,20 +498,14 @@ predictForm.addEventListener("submit", async function (e) {
             </p>
         `;
 
-        // ----- Build an approximate normal bell curve using the CI -----
         const mu   = price_jpy;
         const low  = low_jpy;
         const high = high_jpy;
 
-        // 90% CI ≈ μ ± 1.645σ  → solve for σ
         const Z90 = 1.645;
         let sigma = (high - low) / (2 * Z90);
-        // basic guard in case CI is degenerate
-        if (!sigma || sigma <= 0) {
-            sigma = mu * 0.20 / Z90;  // fallback: ~20% band
-        }
+        if (!sigma || sigma <= 0) sigma = mu * 0.20 / Z90;
 
-        // Generate curve points on [low - σ, high + σ]
         const xMin = Math.max(0, low - sigma);
         const xMax = high + sigma;
         const N = 80;
@@ -655,52 +515,16 @@ predictForm.addEventListener("submit", async function (e) {
         for (let i = 0; i <= N; i++) {
             const x = xMin + (xMax - xMin) * (i / N);
             const z = (x - mu) / sigma;
-            const y = Math.exp(-0.5 * z * z);  // unnormalised normal pdf
+            const y = Math.exp(-0.5 * z * z);
             curve.push({ x: x, y: y });
             if (y > maxY) maxY = y;
         }
 
-        // Datasets: bell curve + vertical line for estimate + markers for CI bounds
         rangeChart.data.datasets = [
-            {
-                label: "Predicted distribution",
-                data: curve,
-                parsing: false,
-                borderWidth: 2,
-                tension: 0.35,
-                pointRadius: 0
-            },
-            {
-                label: "Estimate",
-                data: [
-                    { x: mu,   y: 0 },
-                    { x: mu,   y: maxY }
-                ],
-                parsing: false,
-                borderDash: [5, 5],
-                pointRadius: 0,
-                borderWidth: 1.5
-            },
-            {
-                label: "CI low",
-                data: [
-                    { x: low,  y: 0 },
-                    { x: low,  y: maxY * 0.8 }
-                ],
-                parsing: false,
-                pointRadius: 0,
-                borderWidth: 1,
-            },
-            {
-                label: "CI high",
-                data: [
-                    { x: high, y: 0 },
-                    { x: high, y: maxY * 0.8 }
-                ],
-                parsing: false,
-                pointRadius: 0,
-                borderWidth: 1,
-            }
+            { label: "Predicted distribution", data: curve, parsing: false, borderWidth: 2, tension: 0.35, pointRadius: 0 },
+            { label: "Estimate", data: [{ x: mu, y: 0 }, { x: mu, y: maxY }], parsing: false, borderDash: [5, 5], pointRadius: 0, borderWidth: 1.5 },
+            { label: "CI low",  data: [{ x: low, y: 0 }, { x: low, y: maxY * 0.8 }], parsing: false, pointRadius: 0, borderWidth: 1 },
+            { label: "CI high", data: [{ x: high, y: 0 }, { x: high, y: maxY * 0.8 }], parsing: false, pointRadius: 0, borderWidth: 1 }
         ];
 
         rangeChart.update();
